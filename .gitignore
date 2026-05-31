@@ -1,0 +1,17 @@
+# Isolation Environment (PEP 668)
+.venv/
+venv/
+ENV/
+
+# Python internal cache and bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# IDE architecture files
+.vscode/
+.idea/
+*.swp
+*.swo
