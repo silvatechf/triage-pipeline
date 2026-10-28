@@ -1,103 +1,79 @@
-# Triage Pipeline – Análisis de Telemetría Basado en Comportamiento para Operaciones de SOC
+# Triage Pipeline
 
-Triage Pipeline es un laboratorio de ciberseguridad defensiva enfocado en el análisis de telemetría de seguridad y el triaje automatizado de eventos. 
+A defensive cybersecurity lab demonstrating a small Flask API for ingesting simulated authentication telemetry and assigning a heuristic risk score based on event timing and a supplied abuse score.
 
-El proyecto simula un flujo de trabajo real de un SOC mediante el procesamiento de eventos de autenticación a través de una API REST y la aplicación de técnicas de análisis de comportamiento para diferenciar la actividad de usuarios legítimos de posibles ataques automatizados. En lugar de depender exclusivamente de umbrales estáticos o detección basada en firmas, el sistema evalúa los patrones temporales entre eventos para identificar comportamientos sospechosos y reducir el ruido de las alertas.
+> **Scope:** educational prototype, not a production SOC/SIEM integration or a validated brute-force detector. Timing patterns alone cannot reliably distinguish automated attacks from human activity. The MITRE ATT&CK mapping is contextual, not proof that an attack occurred.
 
----
+## What it demonstrates
 
-![THREAT INTELLIGENCE MATRIX](./assets/img1.png)
+- A REST endpoint for receiving JSON telemetry.
+- An explainable heuristic based on intervals between events.
+- A combined score using behavioral timing (60%) and a caller-supplied abuse score (40%).
+- Structured JSON output with a verdict and contextual MITRE ATT&CK reference.
+- A client script simulating two event patterns for local testing.
 
-## 🎯 Objetivos
+## Architecture
 
-Este laboratorio fue creado para demostrar habilidades prácticas en:
-* **Desarrollo en Python** (Prácticas de Clean Code y uso de la librería estándar)
-* **Diseño de APIs REST** con Flask
-* **Procesamiento e Ingesta de Telemetría** de Seguridad
-* **Análisis de Comportamiento** y Entropía Temporal
-* **Entornos Linux** (Despliegue y ejecución)
-* **Automatización de Seguridad** (Análisis de logs y puntuación reactiva)
-* **Generación de Evidencias en JSON** para ingesta posterior
-* **Mapeo con la Matriz MITRE ATT&CK**
+- `src/api_server.py` — Flask endpoint at `POST /api/v1/triage`, in-memory event history, heuristic scoring, and JSON response.
+- `src/telemetry_agent.py` — sends simulated events to the local API.
 
----
+The implementation stores recent timestamps in process memory keyed by `target_ioc`. State is lost when the server restarts and is not shared across multiple workers. The input abuse score is supplied by the client and is not independently verified.
 
-## 🏛️ Arquitectura
+## Requirements
 
-La solución está compuesta por dos componentes principales:
+- Python 3.10 or newer recommended.
+- Install dependencies from `requirements.txt`.
 
-### 1. Servidor API (`src/api_server.py`)
-El microservicio central responsable de:
-* Recibir eventos de telemetría en bruto a través de HTTP POST.
-* Procesar intentos de autenticación de forma dinámica.
-* Calcular puntuaciones de riesgo conductual utilizando principios estadísticos.
-* Generar hallazgos de seguridad estructurados en formato JSON.
+## Run locally (Windows PowerShell)
 
-### 2. Agente de Telemetría (`src/telemetry_agent.py`)
-Un cliente ligero utilizado para simular eventos de seguridad y validar la lógica de detección. El agente genera dos escenarios operacionales:
-* **Actividad Automatizada:** Perfil de comportamiento de una herramienta de fuerza bruta.
-* **Actividad Humana:** Fallos de autenticación de usuarios legítimos (errores de escritura/retraso orgánico).
+From the repository root:
 
----
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python src/api_server.py
+```
 
-![Simulación de eventos](./assets/img2.png)
+The API listens on `http://127.0.0.1:5000` by default.
 
-## 🧠 Lógica de Detección
+Open a second PowerShell window, activate the same environment, then run:
 
-El motor de detección analiza el tiempo exacto entre intentos de autenticación consecutivos para detectar la predictibilidad.
+```powershell
+.\.venv\Scripts\Activate.ps1
+python src/telemetry_agent.py
+```
 
-### Actividad Automatizada
-Los scripts y las herramientas de fuerza bruta automatizadas suelen generar solicitudes en intervalos matemáticamente idénticos.
-* **Ejemplo de cadencia:** `1.0s` ➔ `1.0s` ➔ `1.0s` ➔ `1.0s`
-* **Resultado:** Este comportamiento produce una varianza temporal cercana a cero, lo que indica una alta probabilidad de automatización y eleva la puntuación de riesgo.
+The agent submits local simulation data to the API and prints the returned risk score. Use only synthetic data in this lab.
 
-### Actividad Humana
-Las interacciones humanas tienden a ser irregulares y variables debido a limitaciones físicas y retrasos cognitivos.
-* **Ejemplo de cadencia:** `2.1s` ➔ `4.8s` ➔ `1.9s` ➔ `3.7s`
-* **Resultado:** Este comportamiento genera una mayor varianza temporal y el motor lo clasifica como un error de usuario de bajo riesgo.
+## Example request
 
----
+```powershell
+$body = @{
+    target_ioc = "lab-example"
+    timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000
+    abuse_score = "20/100"
+} | ConvertTo-Json
 
-## 📊 Clasificación de Riesgo
+Invoke-RestMethod -Method Post `
+    -Uri "http://127.0.0.1:5000/api/v1/triage" `
+    -ContentType "application/json" `
+    -Body $body
+```
 
-El motor procesa los datos temporales y asigna una puntuación de riesgo dinámica que va de `0` a `100`.
+## Important limitations and safety
 
-| Rango de Puntuación | Clasificación | Descripción / Acción |
-| :--- | :--- | :--- |
-| **0 – 39** | `LOW RISK` | Probable error humano o falso positivo. No se genera alerta. |
-| **40 – 69** | `MEDIUM RISK` | Actividad sospechosa. Requiere monitorización continua. |
-| **70 – 100** | `HIGH RISK` | Alta probabilidad de ataque automatizado. Activa la respuesta de mitigación. |
+- The current scoring logic is a teaching heuristic; it has no calibrated dataset, measured precision/recall, or validated thresholds.
+- The API has no authentication, durable storage, rate limiting, or schema validation beyond basic required-field checks. Do not expose it to a public or untrusted network.
+- The API uses in-memory state and is intended for a single local process.
+- An analyst action is descriptive text only. The project does **not** install firewall rules or automatically block traffic.
+- Included IP addresses and event patterns are simulation examples, not threat-intelligence claims.
+- Only test against systems and data you own or are explicitly authorized to assess.
 
----
+## Project status
 
-## 🛡️ Mapeo MITRE ATT&CK
+This repository is a learning lab. Dependency installation and execution should be verified in your environment before relying on the examples. Automated tests and CI are not currently included.
 
-* **Táctica:** Credential Access
-* **Técnica:** [T1110 – Brute Force](https://attack.mitre.org/techniques/T1110/)
+## License
 
----
-
-## 📋 Ejemplo de Salida (Telemetría JSON)
-
-```json
-{
-  "timestamp": "2026-05-31T18:45:12Z",
-  "source_ip": "185.220.101.5",
-  "risk_score": 97.00,
-  "classification": "HIGH_RISK",
-  "mitre_technique": "T1110",
-  "description": "CRITICAL THREAT - AUTOMATED ATTACK DETECTED"
-}
-
-
-
-triage-pipeline/
-├── .venv/                 # Entorno virtual aislado de Python (PEP 668)
-├── assets/                # Capturas de pantalla de validación operacional
-├── src/
-│   ├── api_server.py      # Servidor API REST y Motor de IA Analítica
-│   └── telemetry_agent.py # Agente de simulación de producción y despacho de telemetría
-├── .gitignore             # Reglas de protección para entornos locales y caché
-└── README.md              # Documentación técnica y ejecutiva híbrida (IA + FinOps)
-
-
+Check the repository's licensing status before redistributing or reusing the project.
